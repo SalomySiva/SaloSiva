@@ -1,0 +1,76 @@
+from PyPDF2 import PdfReader
+from langchain.text_splitter import CharacterTextSplitter
+from langchain_openai.embeddings import OpenAIEmbeddings
+from langchain.vectorstores import FAISS
+from langchain_openai import OpenAI
+from dotenv import load_dotenv
+from langchain.chains import LLMChain
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_groq import ChatGroq
+import os
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+load_dotenv()
+
+
+# Set OpenAI API key
+#api_key = os.getenv['GROQ_API_KEY']
+#groq_api_key = os.environ['GROQ_API_KEY']
+groq_api_key = os.getenv("GROQ_API_KEY") 
+# Read the PDF document
+pdfreader = PdfReader('Policy_STM_final.pdf')
+
+# Extract raw text from the PDF
+raw_text = ''
+for page in pdfreader.pages:
+    content = page.extract_text()
+    if content:
+        raw_text += content
+
+# Split the raw text into manageable chunks
+text_splitter = CharacterTextSplitter(
+    separator="\n",
+    chunk_size=5000,
+    chunk_overlap=200,
+    length_function=len,
+)
+texts = text_splitter.split_text(raw_text)
+
+# Download embeddings
+embeddings = OpenAIEmbeddings()
+
+# Create a vector store for the document
+document_search = FAISS.from_texts(texts, embeddings)
+
+llm = ChatGroq(temperature=0, groq_api_key=groq_api_key, model_name="mixtral-8x7b-32768")
+
+
+
+prompt = """System: 
+You are a  sql developerandd expert in converting mapping documents to {question} to load data
+Consider the {input} as the source-to-target mapping. 
+Generate SQL queries to retrieve data from the source tables and load in into the target tables. 
+Provide the output as separate SQL queries for each table.
+"""
+
+
+developer_chain = LLMChain.from_string(
+    llm=llm,
+    template=prompt
+)
+
+
+
+# Search for relevant documents based on the query prompt
+docs = document_search.similarity_search(prompt)
+
+role=' SQL Developer' 
+request = 'create sql queries'
+# Generate SQL queries using Langchain and OpenAI
+
+result = developer_chain.run({'input': docs, 'question': request})
+# Write the SQL queries to a text file
+with open('SQLQueries.txt', 'w') as file:
+    file.write(result)
+
+print(result)
