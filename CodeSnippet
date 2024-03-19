@@ -1,0 +1,35 @@
+import streamlit as st
+import openai
+ 
+openai.api_key = ‘OPEN ‘API KEY
+ 
+def analyze_code_and_suggest(code_snippet):
+    prompt = f"Given the following code snippet, suggest alternate solutions with a code to implement the same :\n\n{code_snippet}\n\nSuggested Solutions:"
+    
+  
+    response = openai.Completion.create(
+        engine="text-davinci-003",
+        prompt=prompt,
+        max_tokens=1500
+    )
+    suggestion = response.choices[0].text.strip()
+    suggestion_lines = suggestion.split('\n')
+    
+    return suggestion_lines
+ 
+ 
+def main():
+    st.title("Code Snippet Analyzer")
+    
+    
+    code_snippet = st.text_area("Enter your code snippet here:")
+    
+    
+    if st.button("Analyze"):
+        suggestion_lines = analyze_code_and_suggest(code_snippet)
+        
+        
+        st.subheader("Alternate Solution")
+        for line in suggestion_lines:
+            st.write(line)
+ 
