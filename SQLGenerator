@@ -1,0 +1,62 @@
+from PyPDF2 import PdfReader
+from langchain.text_splitter import CharacterTextSplitter
+from langchain_openai.embeddings import OpenAIEmbeddings
+from langchain.vectorstores import FAISS
+import os
+from langchain.chains.question_answering import load_qa_chain
+from langchain_openai import OpenAI
+from dotenv import load_dotenv
+import os
+load_dotenv()
+
+
+
+OpenAI.api_key = os.getenv('OPENAI_API_KEY')
+
+pdfreader = PdfReader('Policy_STM_final.pdf')
+
+from typing_extensions import Concatenate
+
+raw_text = ''
+
+for i , page in enumerate(pdfreader.pages):
+    content = page.extract_text()
+    if content:
+        raw_text +=content
+
+text_splitter = CharacterTextSplitter(
+    separator = "\n" ,
+    chunk_size = 5000,
+    chunk_overlap = 200,
+    length_function = len,
+
+)
+
+texts = text_splitter.split_text(raw_text)
+
+# Download embeddings
+
+embeddings = OpenAIEmbeddings()
+
+document_search  = FAISS.from_texts(texts,embeddings)
+
+chain = load_qa_chain(OpenAI(), chain_type='stuff')
+
+
+query = """You are SQL developer, the input provided is the mapping sheet which will help you understand hw the source data is populated into target table
+Consider the {docs} as the source-to-target mapping. 
+Generate SQL queries to retrieve data from the source tables and load into the target tables. 
+Provide the output as separate SQL queries for each table."""
+                 
+
+            
+
+docs = document_search.similarity_search(query)
+result = chain.run(input_documents = docs, question = query)
+
+file = open ('TestSQL.txt','w')
+file.write(result)
+
+print(result)
+
+file.close()
