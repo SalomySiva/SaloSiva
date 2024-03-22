@@ -1,0 +1,175 @@
+import pandas as pd
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+
+from langchain_openai import OpenAI
+import os
+from dotenv import find_dotenv, load_dotenv
+
+from docx import Document
+from docx.shared import Inches
+from docx import Document
+from docx.shared import Pt
+
+load_dotenv(find_dotenv())
+os.environ["OPENAI_API_KEY"]=str(os.getenv("OPENAI_API_KEY"))
+
+
+OpenAI.api_key = os.getenv('OPENAI_API_KEY')
+
+# Load the DataFrame from the Excel file (replace 'your_excel_file.xlsx' with your actual file path)
+input_excel_file = 'Policy_Sample_STM_v1.xlsx'
+transformation_rules = pd.read_excel(input_excel_file)
+
+
+# Initialize a set to store unique insert queries
+unique_insert_queries = set()
+
+# Iterate over unique target tables
+unique_target_tables = transformation_rules['Tgt_Table'].unique()
+unique_source_tables = transformation_rules['Src_Table'].unique()
+
+for tgt_table in unique_target_tables:
+    for src_table in unique_source_tables:
+        # Check if both source table and target table have values
+        if pd.notnull(src_table) and pd.notnull(tgt_table):
+            # Filter rows based on the current target table and source table
+            current_tgt_table_rows = transformation_rules[(transformation_rules['Tgt_Table'] == tgt_table) & (transformation_rules['Src_Table'] == src_table)]
+
+            # Initialize lists to store column names and source columns for the current target table
+            query = []
+
+            # Iterate through each row in the filtered DataFrame and construct column names and source columns
+            for _, row in current_tgt_table_rows.iterrows():
+                # Check for NaN in 'Src Column Name' and 'Transformation Rule' columns
+                if pd.notnull(row['Src Column Name']):
+                    query.append(f"{row['Src Column Name']} as {row['Tgt Column Name']}")
+                else:
+                    if row['Transformation Rule'] == 'DIRECT':
+                        query.append(f"{row['Src Column Name']} as {row['Tgt Column Name']}")
+                    else:
+                        query.append(f"{row['Transformation Rule']} as {row['Tgt Column Name']}")
+            
+
+            target_query = ' , '.join(query).replace("'", "").replace("[", "").replace("]", "").replace("nan", "NULL")
+            
+            # Check if target_query is not empty or null
+            if target_query:
+                # Construct the INSERT INTO query
+                columns = ', '.join(current_tgt_table_rows['Tgt Column Name'])
+                insert_query = f" Query for target table {tgt_table} : \n SELECT {target_query} FROM {src_table};"
+                # Add the insert_query to the set of unique insert queries
+                unique_insert_queries.add(insert_query)
+
+model=ChatOpenAI(model="gpt-3.5-turbo")
+
+
+
+sql_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", """You are a SQL developer. Please create syntactically correct sqls to load the tables 
+                 wherever there is generate surrogate key use row_number function to generate surrogate key 
+                 whenever there is mention to join , form the query in such a way it joins with those tables and populates the values""" ),
+                ("user", "Question:{question}\n Context:{context}")
+            ]
+        )
+sql_chain = sql_prompt | model
+
+sql_question = "Can you create sqls to load the table"
+# Write responses to a text file
+with open('SQLDocument.txt', 'w') as file:
+    # Print the unique insert queries
+    for query in unique_insert_queries:
+        context = query
+        sql_response = sql_chain.invoke({"question": sql_question, "context": context})
+        # Write the content value to the file
+        file.write(sql_response.content + '\n')  
+
+
+tester_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", """You are a tester. Please create test case document, give the response  in the below format
+                 Do not give ```sql in the output, create syntactically correct sqls for testing
+                 Test Case ID: (e.g., TC_tablename_001)
+                Description: A brief description of what the test case is verifying.
+                Pre-Conditions: Any specific data or setup needed before running the test.
+                Test Steps: The actual SQL statement to be executed.
+                 Expected Result: The expected output of the SQL statement.""" ),
+                ("user", "Question:{question}\n Context:{context}")
+            ]
+        )
+tester_chain = tester_prompt | model
+
+tester_question = "Can you create test case document along with sqls"
+# Write responses to a text file
+with open('TestCaseDocument.txt', 'w') as file:
+    # Print the unique insert queries
+    for query in unique_insert_queries:
+        context = query
+        tester_response = tester_chain.invoke({"question": tester_question, "context": context})
+        # Write the content value to the file
+        file.write(tester_response.content + '\n')  
+
+       
+# Add settings to the doc file to be created for design document
+
+document = Document()
+style = document.styles['Normal']
+font = style.font
+font.name = 'Calibri'
+font.size = Pt(12)
+document.add_heading('Design Document', 0)
+document.add_picture('Logo.png', width = Inches(1))
+
+# input for creating design document
+
+context=transformation_rules
+design_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", """You are a Software Design. The input given to is a data frame which has the source target mapping sheet 
+                 It has the information of the source table from which the data is extracted amd how it is transformed using transformation rules 
+                and loaded into target table follow below format
+                 1. Introduction
+Provide an overview of the document and its purpose.
+Describe the context of the project or system for which the mapping is being done.
+2. Source and Target Systems Overview
+Briefly describe the source and target systems.
+Explain the structure, format, and characteristics of the source data.
+Describe the structure, format, and requirements of the target data.
+3. Transformation Rules
+Document any specific transformation rules or business logic applied during the mapping process.
+Include examples to demonstrate how each rule is applied.
+4. Data Quality and Validation
+Describe any data quality checks or validation rules applied during the transformation.
+Document how data anomalies or errors are handled.
+Explain any data cleansing or standardization processes.
+5. Performance Considerations
+Discuss any performance considerations related to the mapping process.
+Document optimizations or techniques used to improve performance, if applicable.
+6. Error Handling and Logging
+Describe how errors or exceptions are handled during the mapping process.
+Document logging mechanisms or error reporting procedures.
+7. Deployment Plan
+Provide a plan for deploying the mapped data to the target system.
+Describe any migration or loading processes involved.
+8. Maintenance and Monitoring
+Discuss ongoing maintenance tasks related to the mappings.
+Document monitoring and auditing procedures to ensure data integrity.
+9. Appendix
+Include any additional documentation, such as glossary of terms, reference materials, or sample data.""" ),
+                ("user", "Question:{question}\n Context:{context}")
+            ]
+        )
+design_chain = design_prompt | model
+
+# Call the agent with relevant prompts and write to output document
+
+design_question = "Can you create design document "
+# Write responses to a variable
+design_response = design_chain.invoke({"question": design_question, "context": context})
+# Write the content value to the file
+val= design_response.content
+document.add_paragraph('\n' + val) 
+
+name='Design_Document'
+document.save(f'{name}.docx')
